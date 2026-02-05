@@ -26,9 +26,15 @@ if image is None:
 
 h, w = image.shape[:2]
 
-# ---------------- Windows ----------------
-cv2.namedWindow("Windscreen Projection")
-cv2.namedWindow("Calibration")
+# ---------------- Windows (Resizable + Positioned) ----------------
+cv2.namedWindow("Windscreen Projection", cv2.WINDOW_NORMAL)
+cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
+
+cv2.resizeWindow("Windscreen Projection", 1280, 720)
+cv2.resizeWindow("Calibration", 400, 300)
+
+cv2.moveWindow("Windscreen Projection", 50, 50)
+cv2.moveWindow("Calibration", 1400, 50)
 
 # ---------------- Trackbars (Boss-friendly labels) ----------------
 cv2.createTrackbar("Top Left", "Calibration", 0, 300, nothing)
@@ -44,7 +50,7 @@ while True:
     bottom_right = cv2.getTrackbarPos("Bottom Right", "Calibration")
     bottom_left = cv2.getTrackbarPos("Bottom Left", "Calibration")
 
-    # Destination points (internal logic hidden from UI)
+    # Destination points (internal logic)
     dst_points = np.float32([
         [0, top_left],          # Top-left
         [w, top_right],         # Top-right

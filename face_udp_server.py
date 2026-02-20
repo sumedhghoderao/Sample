@@ -3,18 +3,20 @@ import os
 import numpy as np
 import socket
 import time
+import pickle
 
 # ----------------------------
 # CONFIG
 # ----------------------------
 IMAGE_FOLDER = "images"
 MODEL_PATH = "model.yml"
+LABELS_PATH = "labels.pkl"
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 9999
 
-FACE_BUFFER_TIME = 30  # seconds
-CONFIDENCE_THRESHOLD = 70  # lower = stricter
+FACE_BUFFER_TIME = 5
+CONFIDENCE_THRESHOLD = 70
 
 # ----------------------------
 # UDP SETUP
@@ -35,51 +37,70 @@ face_cascade = cv2.CascadeClassifier(
 recognizer = cv2.face.LBPHFaceRecognizer_create()
 
 # ----------------------------
-# TRAIN FROM IMAGE FOLDER
+# TRAIN FUNCTION
 # ----------------------------
-def train_from_folder():
+def train_from_folders():
 
     faces = []
     labels = []
+    label_map = {}
+    current_label = 0
 
-    print("📂 Loading images from folder...")
+    print("📂 Loading images...")
 
-    for img_name in os.listdir(IMAGE_FOLDER):
-        img_path = os.path.join(IMAGE_FOLDER, img_name)
+    for person_name in os.listdir(IMAGE_FOLDER):
+        person_path = os.path.join(IMAGE_FOLDER, person_name)
 
-        img = cv2.imread(img_path)
-        if img is None:
+        if not os.path.isdir(person_path):
             continue
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        detected = face_cascade.detectMultiScale(gray, 1.3, 5)
+        label_map[current_label] = person_name
 
-        for (x, y, w, h) in detected:
-            face = gray[y:y+h, x:x+w]
-            faces.append(face)
-            labels.append(0)  # single person
+        for img_name in os.listdir(person_path):
+            img_path = os.path.join(person_path, img_name)
+
+            img = cv2.imread(img_path)
+            if img is None:
+                continue
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            detected = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+            for (x, y, w, h) in detected:
+                face = gray[y:y+h, x:x+w]
+                faces.append(face)
+                labels.append(current_label)
+
+        current_label += 1
 
     if len(faces) == 0:
-        print("❌ No faces found in images folder")
+        print("❌ No faces found.")
         return
 
     recognizer.train(faces, np.array(labels))
     recognizer.save(MODEL_PATH)
 
-    print(f"✅ Training complete using {len(faces)} images")
+    with open(LABELS_PATH, "wb") as f:
+        pickle.dump(label_map, f)
+
+    print(f"✅ Training complete. Trained {current_label} persons.")
 
 # ----------------------------
-# RECOGNITION MODE
+# RECOGNITION FUNCTION
 # ----------------------------
 def recognize():
 
     global client_addr
 
     if not os.path.exists(MODEL_PATH):
-        print("❌ Model not found. Train first.")
+        print("❌ Train first!")
         return
 
     recognizer.read(MODEL_PATH)
+
+    with open(LABELS_PATH, "rb") as f:
+        label_map = pickle.load(f)
+
     cap = cv2.VideoCapture(0)
 
     last_sent_time = 0
@@ -88,7 +109,7 @@ def recognize():
 
     while True:
 
-        # ---- Check UDP client registration ----
+        # UDP registration
         try:
             data, addr = sock.recvfrom(1024)
             if data.decode() == "HELLO":
@@ -114,17 +135,19 @@ def recognize():
 
             if confidence < CONFIDENCE_THRESHOLD:
 
-                cv2.putText(frame, "YOU",
+                name = label_map[label]
+
+                cv2.putText(frame, name,
                             (x, y-10),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.8,
-                            (0, 255, 0),
+                            (0,255,0),
                             2)
 
-                # 30 second buffer
                 if client_addr and (current_time - last_sent_time) > FACE_BUFFER_TIME:
-                    sock.sendto(b"FACE_RECOGNIZED", client_addr)
-                    print("📡 FACE_RECOGNIZED sent")
+                    message = f"FACE_RECOGNIZED:{name}"
+                    sock.sendto(message.encode(), client_addr)
+                    print(f"📡 Sent recognition for {name}")
                     last_sent_time = current_time
 
             else:
@@ -132,12 +155,12 @@ def recognize():
                             (x, y-10),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.8,
-                            (0, 0, 255),
+                            (0,0,255),
                             2)
 
             cv2.rectangle(frame, (x,y), (x+w,y+h), (255,0,0), 2)
 
-        cv2.imshow("Jetson Face Recognition", frame)
+        cv2.imshow("Jetson Multi-Person Recognition", frame)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
@@ -149,14 +172,14 @@ def recognize():
 # MAIN MENU
 # ----------------------------
 while True:
-    print("\nPress 1 → Train from images folder")
-    print("Press 2 → Start recognition")
+    print("\nPress 1 → Train All Persons")
+    print("Press 2 → Start Recognition")
     print("Press q → Quit")
 
     choice = input("Enter choice: ")
 
     if choice == "1":
-        train_from_folder()
+        train_from_folders()
 
     elif choice == "2":
         recognize()

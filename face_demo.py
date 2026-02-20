@@ -2,6 +2,7 @@ import cv2
 import os
 import numpy as np
 import pickle
+import time
 
 # ============================
 # CONFIG
@@ -12,8 +13,8 @@ MODEL_PATH = "model.yml"
 LABELS_PATH = "labels.pkl"
 
 CONFIDENCE_THRESHOLD = 58
+HOLD_TIME_AFTER_DISAPPEAR = 10  # seconds
 
-# Map person name → fullscreen image
 IMAGE_MAP = {
     "sumedh": "IMAGE1.png",
     "vijay": "IMAGE2.png"
@@ -82,6 +83,7 @@ def train_from_folders():
 
     print("✅ Training complete")
 
+
 # ============================
 # RECOGNITION FUNCTION
 # ============================
@@ -100,6 +102,7 @@ def recognize():
     cap = cv2.VideoCapture(0)
 
     current_displayed_person = None
+    face_last_seen_time = None
     window_name = "Fullscreen Alert"
 
     print("🟢 Recognition started (press q to quit)")
@@ -124,6 +127,7 @@ def recognize():
 
                 name = label_map[label]
                 detected_person = name
+                face_last_seen_time = time.time()
 
                 cv2.putText(frame,
                             f"{name} ({int(confidence)})",
@@ -145,31 +149,44 @@ def recognize():
             cv2.rectangle(frame, (x,y), (x+w,y+h), (255,0,0), 2)
 
         # ============================
-        # FULLSCREEN IMAGE LOGIC
+        # FULLSCREEN IMAGE CONTROL
         # ============================
 
-        if detected_person and detected_person != current_displayed_person:
+        # Face detected
+        if detected_person:
 
-            if detected_person in IMAGE_MAP:
+            if detected_person != current_displayed_person:
 
-                image_path = IMAGE_MAP[detected_person]
+                if detected_person in IMAGE_MAP:
 
-                if os.path.exists(image_path):
+                    image_path = IMAGE_MAP[detected_person]
 
-                    img = cv2.imread(image_path)
+                    if os.path.exists(image_path):
 
-                    cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
-                    cv2.setWindowProperty(
-                        window_name,
-                        cv2.WND_PROP_FULLSCREEN,
-                        cv2.WINDOW_FULLSCREEN
-                    )
+                        img = cv2.imread(image_path)
 
-                    cv2.imshow(window_name, img)
+                        cv2.namedWindow(window_name, cv2.WND_PROP_FULLSCREEN)
+                        cv2.setWindowProperty(
+                            window_name,
+                            cv2.WND_PROP_FULLSCREEN,
+                            cv2.WINDOW_FULLSCREEN
+                        )
 
-                    current_displayed_person = detected_person
+                        cv2.imshow(window_name, img)
+                        current_displayed_person = detected_person
 
-        # Show camera preview
+        # No face detected
+        else:
+
+            if current_displayed_person and face_last_seen_time:
+
+                elapsed = time.time() - face_last_seen_time
+
+                if elapsed > HOLD_TIME_AFTER_DISAPPEAR:
+                    cv2.destroyWindow(window_name)
+                    current_displayed_person = None
+                    face_last_seen_time = None
+
         cv2.imshow("Camera", frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -177,6 +194,7 @@ def recognize():
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 # ============================
 # MAIN MENU

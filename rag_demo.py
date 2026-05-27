@@ -1,10 +1,13 @@
 import os
 from bs4 import BeautifulSoup
 
-all_docs = []
+chunks = []
 
+# LOAD ALL HTML FILES
 for root, dirs, files in os.walk("docs"):
+
     for file in files:
+
         if file.endswith(".html"):
 
             path = os.path.join(root, file)
@@ -16,22 +19,46 @@ for root, dirs, files in os.walk("docs"):
 
                     text = soup.get_text(separator=" ", strip=True)
 
-                    all_docs.append({
-                        "file": path,
-                        "text": text
-                    })
+                    # SIMPLE CHUNKING
+                    split_chunks = text.split(". ")
+
+                    for chunk in split_chunks:
+
+                        if len(chunk) > 100:
+
+                            chunks.append({
+                                "file": path,
+                                "chunk": chunk
+                            })
 
             except Exception as e:
-                print(f"Error reading {path}: {e}")
+                print(f"Error: {path} -> {e}")
 
-print(f"\nTotal HTML files loaded: {len(all_docs)}")
+print(f"\nTotal chunks created: {len(chunks)}")
 
-print("\n============================")
-print("FIRST DOCUMENT:")
-print("============================\n")
+# SIMPLE SEARCH LOOP
+while True:
 
-print("FILE:", all_docs[0]["file"])
+    query = input("\nAsk something: ").lower()
 
-print("\nTEXT SAMPLE:\n")
+    if query == "exit":
+        break
 
-print(all_docs[0]["text"][:2000])
+    found = False
+
+    for item in chunks:
+
+        if query in item["chunk"].lower():
+
+            print("\n======================")
+            print("FILE:", item["file"])
+            print("======================\n")
+
+            print(item["chunk"][:1000])
+
+            found = True
+
+            break
+
+    if not found:
+        print("\nNo relevant chunk found.")

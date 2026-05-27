@@ -1,9 +1,10 @@
 import os
+import subprocess
 from bs4 import BeautifulSoup
 
 chunks = []
 
-# LOAD ALL HTML FILES
+# LOAD + CHUNK HTML DOCS
 for root, dirs, files in os.walk("docs"):
 
     for file in files:
@@ -19,7 +20,6 @@ for root, dirs, files in os.walk("docs"):
 
                     text = soup.get_text(separator=" ", strip=True)
 
-                    # SIMPLE CHUNKING
                     split_chunks = text.split(". ")
 
                     for chunk in split_chunks:
@@ -32,33 +32,62 @@ for root, dirs, files in os.walk("docs"):
                             })
 
             except Exception as e:
-                print(f"Error: {path} -> {e}")
+                print(f"Error reading {path}: {e}")
 
-print(f"\nTotal chunks created: {len(chunks)}")
+print(f"\nLoaded {len(chunks)} chunks.\n")
 
-# SIMPLE SEARCH LOOP
+# CHAT LOOP
 while True:
 
-    query = input("\nAsk something: ").lower()
+    query = input("Ask: ")
 
-    if query == "exit":
+    if query.lower() == "exit":
         break
 
-    found = False
+    retrieved = None
 
+    # SIMPLE KEYWORD SEARCH
     for item in chunks:
 
-        if query in item["chunk"].lower():
+        if query.lower() in item["chunk"].lower():
 
-            print("\n======================")
-            print("FILE:", item["file"])
-            print("======================\n")
-
-            print(item["chunk"][:1000])
-
-            found = True
-
+            retrieved = item
             break
 
-    if not found:
-        print("\nNo relevant chunk found.")
+    if not retrieved:
+
+        print("\nNo relevant documentation found.\n")
+        continue
+
+    print("\n[Retrieved Context]")
+    print(retrieved["chunk"][:500])
+
+    # BUILD PROMPT
+    prompt = f"""
+Use the following documentation context to answer the question.
+
+Context:
+{retrieved["chunk"]}
+
+Question:
+{query}
+
+Answer briefly and accurately.
+"""
+
+    # RUN QWEN
+    result = subprocess.run(
+        [
+            "/data/data/com.termux/files/home/llama.cpp/build/bin/llama-simple",
+            "-m",
+            "/data/data/com.termux/files/home/llama.cpp/models/qwen2-0_5b-instruct-q4_k_m.gguf",
+            "-p",
+            prompt
+        ],
+        capture_output=True,
+        text=True
+    )
+
+    print("\n[Qwen Answer]\n")
+
+    print(result.stdout)

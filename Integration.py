@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import tflite_runtime.interpreter as tflite
-import subprocess
+import requests
 import time
 
 # --------------------------------------------------
@@ -9,9 +9,8 @@ import time
 # --------------------------------------------------
 
 CORAL_MODEL = "/home/khadas/Documents/coral_test/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"
-QWEN_MODEL = "/home/khadas/Documents/coral_test/qwen2-0_5b-instruct-q4_k_m.gguf"
+
 LABELS_FILE = "/home/khadas/Documents/coral_test/coco_labels.txt"
-LLAMA_CLI = "/home/khadas/llama.cpp/build/bin/llama-cli"
 
 # --------------------------------------------------
 # LOAD LABELS
@@ -45,38 +44,37 @@ INPUT_H = input_details[0]["shape"][1]
 INPUT_W = input_details[0]["shape"][2]
 
 # --------------------------------------------------
-# QWEN FUNCTION
+# QWEN SERVER
 # --------------------------------------------------
 
-def ask_qwen(scene_text):
+def ask_qwen(relation):
 
     prompt = f"""
-You are a vision assistant.
+Relationship:
+{relation}
 
-Detected objects and relationships:
-
-{scene_text}
-
-Describe the scene in one short sentence.
+Describe this naturally in one short sentence.
 """
 
-    result = subprocess.run(
-        [
-            LLAMA_CLI,
-            "-m",
-            QWEN_MODEL,
-            "-c",
-            "512",
-            "-n",
-            "50",
-            "-p",
-            prompt
-        ],
-        capture_output=True,
-        text=True
-    )
+    try:
 
-    return result.stdout
+        response = requests.post(
+            "http://127.0.0.1:8080/completion",
+            json={
+                "prompt": prompt,
+                "n_predict": 30,
+                "temperature": 0.2
+            },
+            timeout=10
+        )
+
+        data = response.json()
+
+        return data.get("content", "")
+
+    except Exception as e:
+
+        return f"Qwen Error: {e}"
 
 # --------------------------------------------------
 # CAMERA
@@ -84,7 +82,8 @@ Describe the scene in one short sentence.
 
 cap = cv2.VideoCapture(0)
 
-last_qwen_time = 0
+last_relation = ""
+detection_start_time = None
 
 while True:
 
@@ -125,7 +124,8 @@ while True:
         )[0]
     )
 
-    objects = []
+    bottle = None
+    mouse = None
 
     for i in range(count):
 
@@ -147,13 +147,12 @@ while True:
 
         label = labels.get(class_id, str(class_id))
 
-        objects.append(
-            {
-                "label": label,
-                "cx": cx,
-                "cy": cy
-            }
-        )
+        # ---------------------------------
+        # ONLY BOTTLE + MOUSE
+        # ---------------------------------
+
+        if label not in ["bottle", "mouse"]:
+            continue
 
         cv2.rectangle(
             frame,
@@ -168,61 +167,109 @@ while True:
             label,
             (xmin, ymin - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
+            0.6,
             (0, 255, 0),
             2
         )
 
-    # --------------------------------------------
+        if label == "bottle" and bottle is None:
+
+            bottle = {
+                "cx": cx,
+                "cy": cy
+            }
+
+        elif label == "mouse" and mouse is None:
+
+            mouse = {
+                "cx": cx,
+                "cy": cy
+            }
+
+    # ---------------------------------
     # RELATIONSHIP ENGINE
-    # --------------------------------------------
+    # ---------------------------------
 
-    relationships = []
+    if bottle is not None and mouse is not None:
 
-    if len(objects) >= 2:
+        if detection_start_time is None:
 
-        for i in range(len(objects)):
-            for j in range(i + 1, len(objects)):
+            detection_start_time = time.time()
 
-                a = objects[i]
-                b = objects[j]
+        elapsed = time.time() - detection_start_time
 
-                dx = abs(a["cx"] - b["cx"])
+        cv2.putText(
+            frame,
+            f"Stable Detection: {elapsed:.1f}s",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 255),
+            2
+        )
 
-                if a["cx"] < b["cx"]:
-                    relation = f"{a['label']} is left of {b['label']}"
-                else:
-                    relation = f"{a['label']} is right of {b['label']}"
+        if elapsed >= 5:
 
-                if dx < 120:
-                    relation += " and near it"
+            dx = abs(
+                bottle["cx"] - mouse["cx"]
+            )
 
-                relationships.append(relation)
+            if bottle["cx"] < mouse["cx"]:
 
-    # --------------------------------------------
-    # QWEN EVERY 5 SECONDS
-    # --------------------------------------------
+                relation = (
+                    "The bottle is to the left "
+                    "of the mouse"
+                )
 
-    now = time.time()
+            else:
 
-    if now - last_qwen_time > 5:
+                relation = (
+                    "The bottle is to the right "
+                    "of the mouse"
+                )
 
-        scene_text = "\n".join(relationships)
+            if dx < 120:
 
-        if scene_text:
+                relation += (
+                    " and very close to it"
+                )
 
-            print("\n" + "=" * 60)
-            print("RELATIONSHIPS")
-            print(scene_text)
+            cv2.putText(
+                frame,
+                relation,
+                (20, 80),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2
+            )
 
-            response = ask_qwen(scene_text)
+            if relation != last_relation:
 
-            print("\nQWEN:")
-            print(response)
+                print(
+                    "\n=============================="
+                )
 
-        last_qwen_time = now
+                print("RELATION:")
+                print(relation)
 
-    cv2.imshow("Coral + Qwen Demo", frame)
+                answer = ask_qwen(
+                    relation
+                )
+
+                print("\nQWEN:")
+                print(answer)
+
+                last_relation = relation
+
+    else:
+
+        detection_start_time = None
+
+    cv2.imshow(
+        "Coral + Qwen Demo",
+        frame
+    )
 
     key = cv2.waitKey(1)
 

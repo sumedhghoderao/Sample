@@ -1,3 +1,10 @@
+/home/khadas/llama.cpp/build/bin/llama-server \
+-m /home/khadas/models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+-t 6 \
+-c 512 \
+--host 127.0.0.1 \
+--port 8080
+
 import cv2
 import numpy as np
 import tflite_runtime.interpreter as tflite
